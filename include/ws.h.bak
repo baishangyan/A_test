@@ -1,0 +1,41 @@
+#ifndef __WS_H__
+#define __WS_H__
+
+#include "../include/libwebsockets.h"
+#include <pthread.h>
+
+
+
+
+
+/******************************ws func*******************************/
+void main_ws();
+void main_ws_();
+/******************************ws func*******************************/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#endif
