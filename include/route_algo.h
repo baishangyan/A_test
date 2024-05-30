@@ -14,7 +14,6 @@ Ad hoc路由协议，如目的序列距离矢量路由算法(DSDV)、无线路�
 
 #include "../include/common.h"
 
-#define MAX_NODE_NUM 500
 //接收状态
 typedef struct 
 {

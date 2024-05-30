@@ -62,7 +62,7 @@ void send_udp_or_udpmulti(int localfd, UINT8* pbuf, UINT32 len, struct sockaddr_
  * functaion  : init_udpmulti
  * description: 初始化UDP组播socket
  * ******************************************************************/
-int init_udpmulti(int port)
+int init_udpmulti(int port, const char* mulip)
 {
     int sockfd = INVALID;
     struct ip_mreq mreq;
@@ -71,7 +71,7 @@ int init_udpmulti(int port)
 
     sin.sin_family = AF_INET;
     sin.sin_port = htons(port);
-    inet_pton(AF_INET, "226.0.0.20", &sin.sin_addr);
+    inet_pton(AF_INET, mulip, &sin.sin_addr);
 
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd == INVALID)
@@ -556,14 +556,227 @@ void init_dst_addr(struct sockaddr_in* psin)
 }
 
 
+//////////////////////////////////////////////////////////////////
+//自定义组播协议
+
+multi_t g_multi[e_multi_p_max];
+int g_multi_fd = -1;
+databuf_t g_databuf[e_databufmax];
+
+
+//测距基值发送
+void dist_basedata_snd(void* data)
+{
+    g_databuf[e_tx].len += 1;
 
 
 
+    memcpy(g_databuf[e_tx].buf, data, g_databuf[e_tx].len);
+}
+
+//测距基值接收计算距离
+void dist_basedata_rcv()
+{
+    
+}
+
+//非ssid测距数据发送
+void dist_len_snd(void* data)
+{
+    g_databuf[e_tx].len += 1;
 
 
 
+    memcpy(g_databuf[e_tx].buf, data, g_databuf[e_tx].len);
+}
+
+//ssid测距数据收集
+void dist_len_rcv()
+{
+    
+}
+
+//ssid测距数据上报
+void dist_len_rpt()
+{
+    
+}
+
+int check_p_hdr_til(UINT8* buf, int len, int dataidx)
+{
+    pdu_hdr_t* pdu_hdr = (pdu_hdr_t*)&buf[dataidx];
+    pdu_til_t* pdu_til = NULL;
+
+    if (pdu_hdr->head == MULTI_HEAD)
+    {
+        if ((pdu_hdr->len + dataidx) <= len)
+        {
+            pdu_til = (pdu_til_t*)&buf[dataidx + pdu_hdr->len - sizeof(pdu_til_t)];
+            if (pdu_til->tail == MULTI_TAIL)
+            {
+                return pdu_hdr->len;
+            }
+            else
+            {
+                printf("tail fail : %#x.\n", pdu_til->tail);
+            }
+        }
+        else
+        {
+            printf("len fail : %#x.\n", pdu_hdr->len);
+        }
+    }
+    else
+    {
+        printf("head fail : %#x.\n", pdu_hdr->head);
+    }
+
+    return FALSE;
+}
+
+void multi_pdu_rx(UINT8* buf)
+{
+    pdu_hdr_t* pdu_hdr = (pdu_hdr_t*)buf;
+    int sdu_len = pdu_hdr->len - (sizeof(pdu_hdr_t) + sizeof(pdu_til_t));
+
+    switch(pdu_hdr->msg_type)
+    {
+        case e_dist_basedata:
+        {
+            if (sdu_len == sizeof(MacTWRHellodata))
+            {
+                dist_basedata_rcv();
+            }
+            else
+            {
+                printf("dist basedata rxlen err : %d.\n", sdu_len);
+            }
+            break;
+        }
+        case e_dist_len:
+        {
+            if (sdu_len == sizeof(MacNodeLendata))
+            {
+                dist_len_rcv();
+            }
+            else
+            {
+                printf("dist basedata rxlen err : %d.\n", sdu_len);
+            }
+            break;
+        }
+        default:
+        {
+            printf("dist msg_type err : %d.\n", pdu_hdr->msg_type);
+        }
+    }
+}
+
+//组播数据接收，拆分出数据包
+void multi_data_rx(UINT8* buf, int len)
+{
+    int dataidx = 0;
+    int pkglen, msgnum = 0;
+
+    while(dataidx < len)
+    {
+        //校验包头包尾
+        pkglen = check_p_hdr_til(buf, len, dataidx);
+        if (!pkglen)
+        {
+            printf("loss pkg len : %d.\n", (len - dataidx));
+            break;
+        }
+        multi_pdu_rx(&buf[dataidx]);
+
+        dataidx += pkglen;
+    }
+}
+
+//组播遍历接收
+void multi_rx()
+{
+    int recvLen = 0;
+    UINT32 sin_len = sizeof(struct sockaddr_in);
+    struct sockaddr_in remotesin;
+
+    
+    remotesin.sin_family = AF_INET;
+    remotesin.sin_port = htons(MULTI_PORT);
+    inet_pton(AF_INET, "225.0.0.30", &remotesin.sin_addr);
+    
+    recvLen = recvfrom(g_multi_fd, g_databuf[e_tx].buf, sizeof(g_databuf[e_tx].buf), MSG_DONTWAIT, (struct sockaddr*)&remotesin, &sin_len);
+
+    if (recvLen > 0)
+    {
+        g_databuf[e_tx].len = recvLen;
+        multi_data_rx(g_databuf[e_tx].buf, g_databuf[e_tx].len);
+    }
+}
 
 
+//组播遍历发送
+void multi_tx()
+{
+    int i;
+    struct sockaddr_in remotesin;
+    remotesin.sin_family = AF_INET;
+    remotesin.sin_port = htons(MULTI_PORT);
+    inet_pton(AF_INET, "225.0.0.30", &remotesin.sin_addr);
 
+    g_databuf[e_tx].len = 0;
+    //将数据收集到buf
+    for (i = 0; i < e_multi_p_max; i++)
+    {
+        if (g_multi[i].flg)
+        {
+            g_multi[i].func(g_multi[i].data);
+        }
+    }
 
+    //统一发送buf
+    sendto(g_multi_fd, g_databuf[e_tx].buf, g_databuf[e_tx].len, 0, (struct sockaddr*)&remotesin, sizeof(struct sockaddr_in));
+}
+
+//组播初始化
+void dist_init()
+{
+    multi_t* multi_p = NULL;
+    
+    g_multi_fd = init_udpmulti(MULTI_PORT, "225.0.0.30");
+
+    multi_p = &g_multi[e_dist_basedata];
+    multi_p->flg = FALSE;
+    multi_p->data = NULL;
+    multi_p->func = dist_basedata_snd;
+    multi_p->expire = 10000;
+
+    multi_p = &g_multi[e_dist_len];
+    multi_p->flg = FALSE;
+    multi_p->data = NULL;
+    multi_p->func = dist_len_snd;
+    multi_p->expire = 10000;
+    
+
+    g_databuf[e_tx].len = 0;
+    g_databuf[e_rx].len = 0;
+}
+
+//定时处理
+void expire_handle(int icount)
+{
+    multi_t* multi_p = NULL;
+    int i;
+
+    for (i = 0; i < e_multi_p_max; i++)
+    {
+        multi_p = &g_multi[i];
+        if (icount % multi_p->expire == 100)
+        {
+            multi_p->flg = TRUE;
+        }
+    }
+
+    
+}
 

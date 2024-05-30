@@ -30,10 +30,95 @@ typedef struct frame_send
     UINT16      tail;
 } stframe_send;
 
+//////////////////////////////////////////////////////////////////
+//自定义组播协议
+
+typedef struct 
+{
+#define MULTI_HEAD 0xFB00
+    UINT16 head;
+    UINT16 len;
+    UINT16 msg_type;
+} pdu_hdr_t;
+
+typedef struct 
+{
+#define MULTI_TAIL 0x00BF
+    UINT16 tail;
+} pdu_til_t;
+
+//测距数据
+typedef struct {
+    int replyb;
+    int roundb;
+} MacTWRLendata;
+
+//测距基值传递
+typedef struct {
+    int nodeid;
+    MacTWRLendata twrdata[MAX_NODE_NUM];
+} MacTWRHellodata;
+
+//测距数据上报主节点
+typedef struct {
+    unsigned char nodeid;
+    char num;
+    char tmp[2];
+    char rxpwr[MAX_NODE_NUM];
+    int len[MAX_NODE_NUM];
+    int len2[MAX_NODE_NUM];
+} MacNodeLendata;
+
+//主节点测距显示
+typedef struct {
+    unsigned char num;
+    unsigned char nextid;
+    char tmp[2];
+    MacNodeLendata lendata[MAX_NODE_NUM];
+} MacHelloNodeLendata;
+
+
+//服务
+typedef struct 
+{
+
+} sdu_msg_t;
+
+enum E_MULTI_P_TYPE 
+{
+    e_dist_basedata = 0,
+    e_dist_len,
+    e_multi_p_max
+};
+
+typedef void (*multi_func_t)(void*);
+
+typedef struct 
+{
+    int flg;
+    int expire;
+    int cnt;
+    void* data;
+    multi_func_t func;
+} multi_t;
+
+typedef struct 
+{
+    int len;
+    UINT8 buf[SOCK_BUF_LEN];
+} databuf_t;
+enum {e_tx, e_rx, e_databufmax};
+
+#define MULTI_PORT 8008
+
+
+
+//////////////////////////////////////////////////////////////////
 
 /*************************功能函数start*************************/
 int init_udp(int port);
-int init_udpmulti(int port);
+int init_udpmulti(int port, const char* mulip);
+
 int recv_udp_or_udpmulti(int localfd, struct sockaddr_in* remotefd, UINT8* pbuf);
 void send_udp_or_udpmulti(int localfd, UINT8* pbuf, UINT32 len, struct sockaddr_in* remotefd);
 
